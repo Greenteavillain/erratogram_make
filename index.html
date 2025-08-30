@@ -2,7 +2,6 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
 
 <title>erratogram_demo</title>
 
@@ -58,8 +57,7 @@
 
 <img src="./assets/symbol.svg" alt="symbol" style="width: 100px; display:block; margin: 50px auto;">
 <div class="titlebox">make sentence</div>
-<div id="editor" contenteditable="true" spellcheck="false" tabindex="0" inputmode="latin" autocapitalize="off" autocorrect="off"></div>
-
+<div id="editor" contenteditable="true" spellcheck="false" tabindex="0"></div>
 <div class="hint">english only</div>
 <img src="./assets/logotype.svg" alt="logotype" style="width: 300px; display:block; margin: 70px auto;"></imgsrc>
 
@@ -130,98 +128,49 @@
 
   let isComposing = false;
 
-// IME 조합 상태 추적
-editor.addEventListener("compositionstart", () => { isComposing = true; });
-editor.addEventListener("compositionend",   () => { isComposing = false; });
+  editor.addEventListener("compositionstart", () => { isComposing = true; });
+  editor.addEventListener("compositionend",   () => { isComposing = false; });
 
-// 1) 삭제(백스페이스)는 beforeinput 에서 확실히 처리
-editor.addEventListener("beforeinput", (e) => {
-  if (e.inputType === "deleteContentBackward") {
-    const sel = window.getSelection();
-    if (!sel.rangeCount) return;
-    const range = sel.getRangeAt(0);
+  editor.addEventListener("beforeinput", (e) => {
+    if (isComposing) return; // IME 조합 중엔 건너뜀
 
-    let prev = null;
-    if (range.startContainer.nodeType === Node.TEXT_NODE) {
-      if (range.startOffset > 0) return; // 텍스트 중간이면 기본 삭제
-      prev = range.startContainer.previousSibling;
-    } else {
-      const idx = range.startOffset - 1;
-      prev = (idx >= 0) ? range.startContainer.childNodes[idx]
-                        : range.startContainer.previousSibling;
+    // 1) 한 글자 알파벳 입력을 IMG로 치환
+    if (e.inputType === "insertText" && typeof e.data === "string") {
+      const ch = e.data.toLowerCase();
+      if (/^[a-z]$/.test(ch)) {
+        e.preventDefault();  // 기본 문자 입력 막기
+        const sel = window.getSelection();
+        if (!sel.rangeCount) return;
+        const range = sel.getRangeAt(0);
+        const img = insertImgNodeAtRange(range, ch);
+        setSrcWithFallback(img, ch);
+        return;
+      }
+      // 알파벳 1글자가 아니면 기본 동작 허용
     }
 
-    if (prev && prev.nodeName === "IMG") {
-      if (e.cancelable) e.preventDefault(); // 일부 브라우저는 cancelable 아닐 수 있음
-      prev.remove();
+    // 2) 백스페이스로 바로 앞 IMG 삭제
+    if (e.inputType === "deleteContentBackward") {
+      const sel = window.getSelection();
+      if (!sel.rangeCount) return;
+      const range = sel.getRangeAt(0);
+
+      let prev = null;
+      if (range.startContainer.nodeType === Node.TEXT_NODE) {
+        if (range.startOffset > 0) return; // 텍스트 중간이면 기본 삭제
+        prev = range.startContainer.previousSibling;
+      } else {
+        const idx = range.startOffset - 1;
+        prev = (idx >= 0) ? range.startContainer.childNodes[idx]
+                          : range.startContainer.previousSibling;
+      }
+
+      if (prev && prev.nodeName === "IMG") {
+        e.preventDefault();   // 기본 삭제 막고
+        prev.remove();        // IMG만 삭제
+      }
     }
-  }
-}, { passive: false });
-
-// 2) 입력은 모바일 호환을 위해 input 에서 마무리 치환
-editor.addEventListener("input", () => {
-  if (isComposing) return; // 조합 중엔 건너뜀
-
-  const sel = window.getSelection();
-  if (!sel.rangeCount) return;
-  const range = sel.getRangeAt(0);
-
-  // 캐럿 바로 앞의 "마지막 문자"를 찾아서 알파벳이면 IMG로 치환
-  // (텍스트 노드/엘리먼트 노드 모두 대응)
-  function getPrevNodeAndOffset(r) {
-    if (r.startContainer.nodeType === Node.TEXT_NODE) {
-      return { node: r.startContainer, offset: r.startOffset };
-    }
-    const idx = r.startOffset - 1;
-    if (idx >= 0) {
-      const n = r.startContainer.childNodes[idx];
-      // 텍스트 노드면 끝 오프로, 이미지면 그대로, 요소면 그 요소의 마지막 텍스트를 더 탐색
-      return { node: n, offset: (n && n.nodeType === Node.TEXT_NODE) ? n.nodeValue.length : null };
-    } else {
-      return { node: r.startContainer.previousSibling, offset: null };
-    }
-  }
-
-  const { node, offset } = getPrevNodeAndOffset(range);
-  if (!node) return;
-
-  // case 1: 바로 앞이 텍스트 노드 -> 마지막 한 글자 확인
-  if (node.nodeType === Node.TEXT_NODE) {
-    const text = node.nodeValue || "";
-    const pos = (typeof offset === "number") ? offset : text.length;
-    if (pos <= 0) return;
-    const lastChar = text.charAt(pos - 1);
-    const ch = lastChar.toLowerCase();
-
-    if (/^[a-z]$/.test(ch)) {
-      // 마지막 문자 삭제
-      node.nodeValue = text.slice(0, pos - 1) + text.slice(pos);
-
-      // 캐럿 재설정: 삭제 위치로
-      const sel2 = window.getSelection();
-      const r2 = document.createRange();
-      r2.setStart(node, pos - 1);
-      r2.collapse(true);
-      sel2.removeAllRanges();
-      sel2.addRange(r2);
-
-      // IMG 삽입
-      const img = insertImgNodeAtRange(r2, ch);
-      setSrcWithFallback(img, ch);
-    }
-    return;
-  }
-
-  // case 2: 바로 앞이 IMG면 그대로 둠 (이미 치환된 상태)
-  if (node.nodeType === Node.ELEMENT_NODE && node.nodeName === "IMG") {
-    return;
-  }
-
-  // case 3: 요소 노드인 경우 그 안의 마지막 텍스트까지 탐색 (간단 처리 생략 가능)
-  // 필요시 확장 가능
-}, { passive: true });
-
-// (선택) 데스크톱 단축키/화살표키는 OS 기본 동작 유지. keydown 은 굳이 안 써도 됩니다.
+  });
 
 </script>
 </body>
