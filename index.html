@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+
+<title>erratogram_demo</title>
+
+<style>
+  body { font-family: 'Noto Sans', system-ui, sans-serif; font-weight: 400; background-color: #141414;}
+  .titlebox {
+    width: calc(100% - 20lvw - 4px);
+    font-size: 25px;
+    background-color: rgb(65, 65, 65);
+    color: #ddd; position: relative;
+    border-top: 2px solid #ddd; padding-top: 5px; padding-bottom: 7px; padding-left: 10lvw; padding-right: 10lvw;}
+    
+  #editor {
+    border-top: 2px solid #ddd;
+    border-bottom: 2px solid #ddd;
+    padding: 12px 10lvw;
+    min-height: 400px; outline: none; line-height: 1.5;
+    color: #ddd; font-size: 80px;
+  }
+  img.glyph {
+    height: 1em;
+    vertical-align: -0.1em;
+    pointer-events: none;
+    display: inline-block;
+    margin: 0 .15em;
+  }
+  .hint { color:#666; font-size: .9rem; margin-top:.5rem }
+
+  .vertical-line {
+    position: fixed;   /* 화면 고정 */
+    top: 0;
+    bottom: 0;         /* 위~아래 꽉 채움 */
+    left: calc(10lvw - 4px);         /* 화면 정가운데 */
+    width: 2px;        /* 두께 */
+    background-color: #ddd; /* 선 색상 */
+    z-index: 9999;     /* 다른 요소 위에 */
+    pointer-events: none; /* 클릭 방해 안 하게 */
+  }  
+  
+  .vertical-line2 {
+    position: fixed;   /* 화면 고정 */
+    top: 0;
+    bottom: 0;         /* 위~아래 꽉 채움 */
+    right: calc(10lvw - 4px);         /* 화면 정가운데 */
+    width: 2px;        /* 두께 */
+    background-color: #ddd; /* 선 색상 */
+    z-index: 9999;     /* 다른 요소 위에 */
+    pointer-events: none; /* 클릭 방해 안 하게 */
+  }
+
+</style>
+</head>
+<body>
+
+<img src="./assets/symbol.svg" alt="symbol" style="width: 100px; display:block; margin: 50px auto;">
+<div class="titlebox">make sentence</div>
+<div id="editor" contenteditable="true" spellcheck="false"></div>
+<img src="./assets/logotype.svg" alt="logotype" style="width: 300px; display:block; margin: 80px auto;"></imgsrc>
+
+<div class="vertical-line"></div>
+<div class="vertical-line2"></div>
+
+<script>
+  const editor = document.getElementById("editor");
+
+  const MAX_BY_LETTER = {
+    a: 55, b: 61, c: 62, d: 58, e: 71, f: 27, g: 35, h: 57, i: 45,
+    j: 32, k: 43, l: 39, m: 45, n: 90, o: 65, p: 55, q: 35, r: 90,
+    s: 52, t: 54, u: 33, v: 37, w: 34, x: 21, y: 27, z: 22
+  };
+  const learnedMax = {};
+
+  function randInt(min, max) {
+    return Math.floor(Math.random() * (max - min + 1)) + min;
+  }
+
+  function insertImgNodeAtRange(range, alt = "") {
+    const img = document.createElement("img");
+    img.className = "glyph";
+    img.alt = alt;
+    img.draggable = false;
+    img.style.visibility = "hidden";
+    range.deleteContents();
+    range.insertNode(img);
+    range.setStartAfter(img);
+    range.collapse(true);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    return img;
+  }
+
+  function setSrcWithFallback(img, letter) {
+    const knownMax = learnedMax[letter] ?? MAX_BY_LETTER[letter];
+    const DEFAULT_MAX = 55;
+    if (knownMax && knownMax > 0) {
+      const n = randInt(1, knownMax);
+      const src = `./assets/${letter}/${n}.svg`;
+      img.onload = () => { img.style.visibility = "visible"; };
+      img.onerror = () => { backwardProbe(img, letter, knownMax); };
+      img.src = src;
+      return;
+    }
+    backwardProbe(img, letter, DEFAULT_MAX);
+  }
+
+  function backwardProbe(img, letter, startMax) {
+    let n = startMax;
+    img.onload = () => {
+      img.style.visibility = "visible";
+      learnedMax[letter] = Math.max(learnedMax[letter] || 0, n);
+    };
+    img.onerror = () => {
+      n -= 1;
+      if (n >= 1) {
+        img.src = `./assets/${letter}/${n}.svg`;
+      } else {
+        const parent = img.parentNode;
+        if (parent) parent.removeChild(img);
+      }
+    };
+    img.src = `./assets/${letter}/${n}.svg`;
+  }
+
+  editor.addEventListener("keydown", (e) => {
+  if (e.isComposing) return;                 // IME 조합 중이면 통과
+  if (e.ctrlKey || e.metaKey || e.altKey) return; // 단축키는 건드리지 않음
+
+  // 1) 백스페이스로 바로 앞 IMG 지우기
+  if (e.key === "Backspace") {
+    const sel = window.getSelection();
+    if (!sel.rangeCount) return;
+    const range = sel.getRangeAt(0);
+
+    let prev = null;
+    if (range.startContainer.nodeType === Node.TEXT_NODE) {
+      if (range.startOffset > 0) return; // 텍스트 중간이면 기본동작 허용
+      prev = range.startContainer.previousSibling;
+    } else {
+      const idx = range.startOffset - 1;
+      prev = (idx >= 0) ? range.startContainer.childNodes[idx] : range.startContainer.previousSibling;
+    }
+
+    if (prev && prev.nodeName === "IMG") {
+      prev.remove();
+      e.preventDefault();
+    }
+    return;
+  }
+
+  // 2) 탐색/이동키는 통과
+  const navKeys = [
+    "ArrowLeft","ArrowRight","ArrowUp","ArrowDown",
+    "Home","End","PageUp","PageDown","Tab","Escape"
+  ];
+  if (navKeys.includes(e.key)) return;
+
+  // 3) 정확히 '한 글자' 알파벳만 치환
+  const key = e.key.toLowerCase();
+  if (/^[a-z]$/.test(key)) {
+    e.preventDefault();
+    const sel = window.getSelection();
+    if (!sel.rangeCount) return;
+    const range = sel.getRangeAt(0);
+    const img = insertImgNodeAtRange(range, key);
+    setSrcWithFallback(img, key);
+  }
+});
+
+</script>
+</body>
+</html>
